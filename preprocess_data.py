@@ -367,6 +367,17 @@ def preprocess_data(config, df, encode_dates=False, date_cols=None, id_cols=None
     return df, col_descriptor_dict
     
 
+def fetch_data(config, file_name):
+    assert file_name is not None
+
+    filepath = os.path.join(config['data_dir'], file_name+'.parquet')
+
+    if verbose: print(f"Reading file: {filepath}")
+    df = pq.read_table(filepath).to_pandas()
+    if verbose: print("df.shape: ", df.shape)
+
+    return df
+
 # ----------------------------------------------------------------------------------
 
 if __name__ == '__main__':
@@ -375,7 +386,7 @@ if __name__ == '__main__':
     data_preprocessing_config = config_ref.get_data_preprocessing_config()
      
     for file_name, processing_config in file_preprocessing_config_map.items():
-        df = fetch_data(config)
+        df = fetch_data(config, file_name)
 
         df, col_descriptor_dict = preprocess_data(processing_config, df, 
                         verbose=False)
