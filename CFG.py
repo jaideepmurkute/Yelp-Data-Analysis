@@ -1,53 +1,83 @@
 
+import os
+
 class Config:
     def __init__(self):
         self.config_dict = {
-                'data_dir': 'C:\\Users\\Vitthal\\Desktop\\projects\\yelp_data',
+                'data_dir': os.path.join('data'),
                 
-                'data_db_storage_dir': 'C:\\Users\\Vitthal\\Desktop\\projects\\yelp_data\\db_storage',
-                'data_db_name': 'yelp_data',
+                'db_storage_dir': os.path.join('data', 'db_storage'),
+                'db_name': 'yelp_data',
+                
                 'data_db_access_uname': 'db_admin_1', 
                 'data_db_access_pwd': 'pass1234',
                 'create_db_if_not_exists': True, # for data_db
+                
+                'force_extract_data': True,
+                
+                'openai_api_key_path': os.path.join('..', 'openai_api_key.txt'),
             }
 
-        self.data_preprocessing_config = file_preprocessing_config_map = {
+        self.data_preprocessing_config = {
                 'business': {
-                        'drop_cols': ['attributes', 'hours'], 
-                        'encode_dates': True, 
-                        'date_cols': ['date'],
                         'id_cols': ['business_id'],
-                        'handle_outliers': False,
-                        'scale_data': False,
-                        'cols_scaler_type_map': None,
+                        'date_cols': ['date'],
+                        'encode_dates': True, 
+                        'drop_cols': ['attributes', 'hours'], 
+                        'dtype_conversion_map': {
+                                        'business_id': 'str',
+                                        'name': 'str',
+                                        'address': 'str',
+                                        'city': 'str',
+                                        'state': 'str',
+                                        'postal_code': 'str',
+                                        'latitude': 'float32',
+                                        'longitude': 'float32',
+                                        'stars': 'uint8',
+                                        'review_count': 'uint32',
+                                        'is_open': 'uint8',
+                                        'categories': 'str',
+                                        'hours': 'str'
+                                },                      
                     }, 
                 'user': {
-                        'drop_cols': ['friends'], 
-                        'encode_dates': False, 
-                        'date_cols': None,
                         'id_cols': None, 
-                        'handle_outliers': False,
-                        'scale_data': False,
-                        'cols_scaler_type_map': None,
-                    }, 
-                'review': {}, 
-                'tip': {
-                        'drop_cols': None, 
-                        'encode_dates': True, 
-                        'date_cols': ['date'],
+                        'date_cols': ['yelping_since'],
+                        'encode_dates': False, 
+                        'drop_cols': ['elite', 'friends'], 
+                        'dtype_conversion_map': {'user_id': 'str', 
+                                                'name': 'str',
+                                            }, 
+                    },
+                'review': {
                         'id_cols': None,
-                        'handle_outliers': False,
-                        'scale_data': False,
-                        'cols_scaler_type_map': None,
+                        'date_cols': ['date'],
+                        'encode_dates': True, 
+                        'drop_cols': None, 
+                        'dtype_conversion_map': {'review_id': 'str', 
+                                                'user_id': 'str', 
+                                                'business_id': 'str', 
+                                                'text': 'str', 
+                                                'date': 'str', 
+                                                }
+                    }, 
+                'tip': {
+                        'id_cols': None,
+                        'date_cols': ['date'],
+                        'encode_dates': True, 
+                        'drop_cols': None, 
+                        'dtype_conversion_map': {'user_id': 'str', 
+                                'business_id': 'str', 
+                                'text': 'str', 
+                                'compliment_count': 'int'
+                                }
                     }, 
                 'checkin': {
-                        'drop_cols': None, 
-                        'encode_dates': False, 
-                        'date_cols': None,
                         'id_cols': None,
-                        'handle_outliers': False,
-                        'scale_data': False,
-                        'cols_scaler_type_map': None,
+                        'drop_cols': None, 
+                        'date_cols': ['date'],
+                        'encode_dates': False, 
+                        'dtype_conversion_map': {'business_id': 'str'}
                     }, 
             }
 

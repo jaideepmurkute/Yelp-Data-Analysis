@@ -311,8 +311,8 @@ def scale_data_fn(df, scaler_type_cols_map, scaler_type='standard', verbose=Fals
 
 
 def preprocess_data(config, df, encode_dates=False, date_cols=None, id_cols=None, 
-                    handle_outliers=False, 
-                    scale_data=False, cols_scaler_type_map=None, verbose=False):
+                    handle_outliers=False, scale_data=False, cols_scaler_type_map=None, 
+                    verbose=False):
     """
     Preprocesses the given dataframe based on the provided configuration and 
     parameters.
@@ -367,7 +367,7 @@ def preprocess_data(config, df, encode_dates=False, date_cols=None, id_cols=None
     return df, col_descriptor_dict
     
 
-def fetch_data(config, file_name):
+def fetch_data(config, file_name, verbose=False):
     assert file_name is not None
 
     filepath = os.path.join(config['data_dir'], file_name+'.parquet')
@@ -385,7 +385,7 @@ if __name__ == '__main__':
     config = config_ref.get_config()
     data_preprocessing_config = config_ref.get_data_preprocessing_config()
      
-    for file_name, processing_config in file_preprocessing_config_map.items():
+    for file_name, processing_config in data_preprocessing_config.items():
         df = fetch_data(config, file_name)
 
         df, col_descriptor_dict = preprocess_data(processing_config, df, 

@@ -1,0 +1,5 @@
+# ignore everything in the data directory
+*
+# except for this file
+!.gitignore
+!db_storage/*

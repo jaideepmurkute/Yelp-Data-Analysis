@@ -16,8 +16,13 @@ class DatabaseDDLManager:
         Database Data Definition Language (DDL) Manager
             Create, Drop, Alter, Truncate, Rename, Comment, etc.
     '''
-    def __init__(self, db_name):
-        self.db_name = db_name
+    def __init__(self, config):
+        self.db_name = config['db_name']
+        self.db_storage_dir = config['db_storage_dir']
+        if not os.path.exists(self.db_storage_dir):
+            os.makedirs(self.db_storage_dir)
+        self.db_path = os.path.join(self.db_storage_dir, self.db_name)
+        
         
     def open_connection(self):
         """
@@ -31,7 +36,7 @@ class DatabaseDDLManager:
             None
         """
         try:
-            self.conn = sqlite3.connect(self.db_name)
+            self.conn = sqlite3.connect(self.db_path)
             return self.conn
         except Error as e:
             print(e)
@@ -53,7 +58,7 @@ class DatabaseDDLManager:
         '''
         table_names = []
         try:
-            with sqlite3.connect(self.db_name) as conn:
+            with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = cursor.fetchall()
@@ -61,6 +66,7 @@ class DatabaseDDLManager:
                 table_names = [table[0] for table in tables]
         except Error as e:
             print(e)
+            raise e
             
         return table_names
 
@@ -104,22 +110,28 @@ class DatabaseDDLManager:
             # --------------------
 
             if verbose: print("Sanitizing DataFrame")
+            
+            # Drop the columns that are not required or are not supported by the database
             if exclude_columns is not None:
                 df.drop(columns=exclude_columns, inplace=True)
-                
+            
+            # Convert the data types of the columns to make them compatible with SQLite
             if dtype_conversion_map is not None: 
                 for col, dtype in dtype_conversion_map.items():
-                    df[col] = df[col].astype(dtype)
+                    if col in df.columns:
+                        df[col] = df[col].astype(dtype)
+                    else:
+                        print(f"Column '{col}' not found in the DataFrame. Skipping data type conversion!!!")
             
+            # Convert the date columns to datetime objects for SQLite compatibility
             if date_cols is not None:
                 for col in date_cols:
-                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', 
-                                             errors='coerce')
+                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d',  errors='coerce')
             
             # --------------------
             
             if verbose: print("Creating database table...")
-            with sqlite3.connect(self.db_name) as conn:
+            with sqlite3.connect(self.db_path) as conn:
                 # Create the SQL table from the DataFrame
                 df.to_sql(table_name, conn, if_exists='replace', index=False)
             
@@ -130,7 +142,7 @@ class DatabaseDDLManager:
             return True
         else:
             try:
-                with sqlite3.connect(self.db_name) as conn:
+                with sqlite3.connect(self.db_path) as conn:
                     c = conn.cursor()
                     c.execute(create_table_sql)
                 print("Table created successfully")
@@ -272,20 +284,22 @@ class DatabaseDDLManager:
 
 
 
-def create_business_table(config, table_creation_config, table_name):
+def create_table(config, data_preprocessing_config, table_name):
     try:
+        print("Creating table - ", table_name)
         ddl_man.create_table(create_table_sql='', 
                             from_parquet=True, 
                             parquet_file_path=config['file_path'], 
                             table_name=table_name, 
-                            exclude_columns=dtype_conversion_map['exclude_columns'], 
-                            dtype_conversion_map=table_creation_config['dtype_conversion_map'], 
-                            overwrite=False, 
-                            verbose=True)
-        print(f"Table {table_name} created successfully!")
+                            exclude_columns=data_preprocessing_config['drop_cols'], 
+                            dtype_conversion_map=data_preprocessing_config['dtype_conversion_map'], 
+                            overwrite=False,
+                            verbose=False)
+        print(f"Table - {table_name} - created successfully!")
         return True
     except Error as e:
         print("Error creating table:", e)
+        raise e
     
     return False
 
@@ -368,14 +382,16 @@ table_creation_config_map = {
 if __name__ == "__main__":
     cfg = Config()
     config = cfg.get_config()
+    data_preprocessing_config = cfg.get_data_preprocessing_config()
+        
+    ddl_man = DatabaseDDLManager(config)
 
-    ddl_man = DatabaseDDLManager(config['data_db_name'])
+    for table_name in ['business', 'user', 'review', 'tip', 'checkin']: 
+        fname = 'yelp_academic_dataset_' + table_name + '.parquet'
+        config['file_path'] = os.path.join(config['data_dir'], fname)
 
-    for fname in ['business', 'user', 'review', 'tip', 'checkin']: 
-        config['file_path'] = os.path.join(config['data_dir'], f"{fname}.parquet")
-
-        create_business_table(config, table_creation_config_map['fname'], 
-                able_name=fname)
-
+        create_table(config, data_preprocessing_config[table_name], table_name=table_name)
+        
+        print('-'*50)
 
     print("All tables created successfully!")

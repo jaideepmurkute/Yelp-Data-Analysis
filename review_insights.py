@@ -1,180 +1,165 @@
 
+import gc
 
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import torch
-from transformers import pipeline
 
-import os
-import gc
-import json
+from CFG import Config
+from misc_utils import *
+from review_insights_utils import SentimentClassifier, ReviewSummarizer, ActionRecommender
 
-torch.set_num_threads(4)
 np.set_printoptions(linewidth=200) # default 75
 
 # ----------------------------------------------------
-
-def fetch_data(config, file_name):
-    assert file_name is not None
-
-    filepath = os.path.join(config['data_dir'], file_name+'.parquet')
-
-    if verbose: print(f"Reading file: {filepath}")
+def generate_report(config, curr_bus_data, bus_review_summary_dict: dict, other_review_summary_dict: dict, 
+                    actions: str) -> None:
+    # generate a pdf report with review summaries and actionable insights
+    business_id = curr_bus_data.business_id.values[0]
+    business_name = curr_bus_data.name.values[0]
+    city = curr_bus_data.city.values[0]
+    category = curr_bus_data.categories.values[0]
     
-    if file_name == 'business':
-        cols_to_read = ['business_id', 'name', 'address', 'city']
-        df = pq.read_table(filepath, columns=cols_to_read).to_pandas()
-
-    elif file_name == 'review':
-        cols_to_read = ['business_id', 'text']
-        df = pq.read_table(filepath, columns=cols_to_read).to_pandas()
+    report = f"Business ID: {business_id}\n\
+                Business Name: {business_name}\n\
+                City: {city}\n\
+                Category: {category}\n\
+                \n\
+                Business' review summaries: \n\
+                    \tPositive: {bus_review_summary_dict['pos_summary']};\n\
+                    \tNegative: {bus_review_summary_dict['neg_summary']}.\n\
+                Other Business' review summaries: \n\
+                    \tPositive: {other_review_summary_dict['pos_summary']};\n\
+                    \tNegative: {other_review_summary_dict['neg_summary']}.\n\
+                \n\
+                Actions: {actions}"
     
-    if verbose: print("df.shape: ", df.shape)
-    gc.collect()
-
-    return df
-
-
-def get_business_id(config, restanrant_name, city):
-    business_df = fetch_data(config, 'business')
+    # save report to a pdf file
+    report_fname = f'{business_name}_review_insights.pdf'
+    report_save_path = os.path.join(config['output_dir'], report_fname)
+    with open(report_save_path, 'w') as f:
+        f.write(report)
+    print("Report saved to: ", report_save_path)
     
-    business_data = business_df[(restaurants_df['name'] == restanrant_name) & 
-                                (restaurants_df['city'] == city)].business_id
-
-    if business_data.shape[0] == 0:
-        print(f"No business found for restaurant: {restanrant_name} in city: {city}")
-        return None
-    elif business_data.shape[0] > 1:
-        print(f"Multiple businesses found for restaurant: {restanrant_name} in city: {city}")
-        print("Please select one of the following business ids: ")
-        print(business_data)
-
-        return None
-
-    id = business_data.id.values[0]
-    del business_data
-    gc.collect()
-
-    return id
-
-
-def get_review_chunks(reviews, n_chunks=5, chunk_size=10):
-    # Create n chunks of k reviews each - we want n review summaries 
-    review_chunks = []
-    for i in range(n_chunks):
-        # Generate random indices
-        random_indices = np.random.choice(reviews.shape[0], 
-                    size=min(reviews.shape[0], chunk_size), replace=False)
-
-        selected_texts = reviews.iloc[random_indices]['text'].tolist()
-
-        # Merge all the text rows
-        merged_text = ''.join(selected_texts)
-
-        review_chunks.append(merged_text)
-
-    return pd.DataFrame({'text': review_chunks})
-
-
-def get_sentiment_classifier_pipeline():
-    sentiment_classifier_pipeline = pipeline(
-            "sentiment-analysis", 
-            model="distilbert-base-uncased-finetuned-sst-2-english",
-            device=-1, # Force CPU usage (0 = index of first CPU)
-            truncation=True,
-            max_length=512, # Increase the max length to 512
-        )
-    
-    return sentiment_classifier_pipeline
-
-
-def get_text_summarizer_pipeline():
-    summarizer = pipeline(
-            "summarization",
-            model="t5-base",
-            device=-1,  # Force CPU usage (0 = index of first CPU)
-            truncation=True,
-            max_length=512,  # Set the maximum output length
-        )
-    
-    return summarizer
-
-
-def summarize_reviews(df, summarizer):
-    reviews = df['text'].tolist()
-    
-    summaries = summarizer(reviews, truncation=True, max_length=512)
-
-    df['summary'] = [summary['summary_text'] for summary in summaries]
-    
-    return df
-
-
-def classify_sentiment(df, classifier_pipeline):
-    results = classifier_pipeline(df['text'].tolist())  
-    df['sentiment_label'] = [1 if result['label'] == 'POSITIVE' else 0 for result in results]
-    return df
-
-
-def generate_sentiment_labels(df):
-    # df = pd.DataFrame({
-    #     'text': ['This product is amazing!', 'Terrible customer service.', 'It works okay.']
-    # })
-    sent_classifier_pipeline = get_sentiment_classifier_pipeline()
-
-    print("Classifying reviews...")
-    results = sent_classifier_pipeline(df['text'].tolist())  
-    df['sentiment_label'] = [1 if result['label'] == 'POSITIVE' else 0 for result in results]
-    
-    return df
-    
-
-def generate_per_sentiment_summary(df, verbose=False):
-    pos_reviews = review_df[review_df['sentiment_label'] == 1]['text'].to_frame()
-    neg_reviews = review_df[review_df['sentiment_label'] == 0]['text'].to_frame()
-
-    if verbose:
-        print("Number of positive reviews:", len(pos_reviews))
-        print("Number of negative reviews:", len(neg_reviews))
-
-    # ----------------------
-
-    n_chunks = 5  # How many review chunks, each of size 'each_chunk_reviews', to summaize
-    chunk_size = 25  # Number of reviews in each chunk
-
-    pos_reviews_chunk = get_review_chunks(pos_reviews, n_chunks, chunk_size)
-    neg_reviews_chunk = get_review_chunks(neg_reviews, n_chunks, chunk_size)
-
-    # ----------------------
-
-    summarizer_pipeline = get_text_summarizer_pipeline()
-    
-    if verbose: print("Summarizing positive reviews...")
-    pos_review_summaries = summarize_reviews(pos_reviews_chunk, summarizer_pipeline)
-    pos_summary = ''.join(pos_review_summaries.summary.values)
-    
-    if verbose: print("Summarizing negative reviews...")
-    neg_review_summaries = summarize_reviews(neg_reviews_chunk, summarizer_pipeline)
-    neg_summary = ''.join(neg_review_summaries.summary.values)
-
-    return pos_summary, neg_summary
-
 
 def generate_review_insights(config, business_id, verbose=False):
+    # fetch user reviews for the restaurant
     review_df = fetch_data(config, 'review')
-    review_df = review_df[review_df['business_id'] == business_id]
+    
+    curr_bus_review_df = review_df[review_df['business_id'] == business_id]
     gc.collect()
 
-    review_df = generate_sentiment_labels(config, review_df)
-
-    pos_summary, neg_summary = generate_per_sentiment_summary(df, verbose=verbose)
-
-    print("Positive summary: ", pos_summary)
-    print("-"*30)
-    print("Negative summary: ", neg_summary)
+    # --------------------------------------------------------------
+     # keep only manageable number of reviews
+    n_max_reviews = 50
+    if curr_bus_review_df.shape[0] > n_max_reviews:
+        curr_bus_review_df = curr_bus_review_df.sample(n=n_max_reviews, random_state=42)
+    print("After filtering to keep less reviews, if needed: ", curr_bus_review_df.shape)
     
+    
+    # user reviews sentiment classification
+    sc = SentimentClassifier(config)
+    print("Generating sentiment labels for current business' reviews...")
+    curr_bus_review_df = sc.generate_sentiment_labels(curr_bus_review_df, verbose)
+    # curr_bus_review_df['sentiment_label'] = np.random.choice([1, 0], size=curr_bus_review_df.shape[0])
+    print("curr_bus_review_df.shape: ", curr_bus_review_df.shape)
+    
+   
+    gc.collect()
+    # --------------------------------------------------------------
+    
+    # user reviews summary - positive and negative
+    rs = ReviewSummarizer(config)
+    print("Generating review summaries for current business...")
+    bus_review_summary_dict = rs.generate_per_sentiment_summary(curr_bus_review_df, verbose=verbose)
+    # bus_review_summary_dict = {'pos_summary': 'dummy summary', 'neg_summary': 'dummy summary'}
+    print("Positive summary: ", bus_review_summary_dict['pos_summary'])
+    print("-"*30)
+    print("Negative summary: ", bus_review_summary_dict['neg_summary'])
+    
+    gc.collect()
+    # --------------------------------------------------------------
+    
+    print("Fetching business data for other restaurants in the city...")
+    # actionable insights based on user reviews
+    business_df = fetch_data(config, 'business', verbose)
+    print("business_df.shape: ", business_df.shape)
+    
+    curr_bus_data = business_df[business_df['business_id'] == business_id]
+    curr_bus_categories = curr_bus_data.categories.values[0].split(', ')
+    curr_bus_postal_code = curr_bus_data.postal_code.values[0]
+    
+    
+    # Fetch business data for other restaurants in the city
+    # city_bus_data = business_df[business_df['city'] == curr_bus_data.city.values[0]]
+    print("1. Before filtering on zip code: ", business_df.shape)
+    neigh_bus_data = business_df[business_df['postal_code'] == curr_bus_postal_code]
+    print("2. After filtering on zip code: ", neigh_bus_data.shape)
+    
+    if neigh_bus_data.shape[0] == 0:
+        print("No other restaurants found in the same zip code, looking for restaurants in the same city...")
+        neigh_bus_data = business_df[business_df['city'] == curr_bus_data.city.values[0]]
+        print("2. After filtering on zip code: ", neigh_bus_data.shape)
+    
+    if curr_bus_categories is not None and len(curr_bus_categories) > 0:
+        neigh_bus_data = neigh_bus_data[neigh_bus_data['categories'].apply(lambda x: len(x) > 0)]
+        neigh_bus_data = neigh_bus_data[neigh_bus_data['categories'].apply(lambda x: any(category in x for category in curr_bus_categories))]
+    
+    print("After keeping same category businesses: ", neigh_bus_data.shape)
+    
+    # remove the current business
+    neigh_bus_data = neigh_bus_data[neigh_bus_data['business_id'] != business_id]
+    print("After filtering out current business: ", neigh_bus_data.shape)
+    
+    gc.collect()
+    
+    #  (604, 5)
+    # print("neigh_bus_data.shape: ", neigh_bus_data.shape)
+    
+    # ----
+    
+    # Fetch reviews for other restaurants in the city
+    neigh_review_df = review_df[review_df['business_id'].isin(neigh_bus_data.business_id)]
+    print("city_review_df.shape: ", neigh_review_df.shape)
+    gc.collect()
+    
+    # keep only manageable number of reviews
+    n_max_reviews = 50
+    if neigh_review_df.shape[0] > n_max_reviews:
+        neigh_review_df = neigh_review_df.sample(n=n_max_reviews, random_state=42)
+    
+    # raise
+    
+    # sentiment classification for other restaurants in the city
+    print("Generating sentiment labels for other restaurants in the city...")
+    neigh_review_df = sc.generate_sentiment_labels(neigh_review_df)
+    print('neigh_review_df["sentiment_label"].value_counts(): ', neigh_review_df['sentiment_label'].value_counts())
+    
+    # summary of reviews for other restaurants in the city
+    neigh_review_summary_dict = rs.generate_per_sentiment_summary(neigh_review_df, verbose=verbose)
+    print("Neighbourhood Positive summary: ", neigh_review_summary_dict['pos_summary'])
+    print("-"*30)
+    print("Neighbourhood Negative summary: ", neigh_review_summary_dict['neg_summary'])
+    # neigh_review_summary_dict = {'pos_summary': 'this is a good restaurant', 'neg_summary': 'this is a bad restaurant'}
+    
+    gc.collect()
+    
+    # ----------
+    # raise
+    
+    print("Generating actionable insights...")
+    # actionable insights based on other restaurants in the city
+    ar = ActionRecommender(config)
+    actions = ar.generate_actions(bus_review_summary_dict, neigh_review_summary_dict, 
+                                  curr_bus_data, verbose=True)
+    with open('actions.txt', 'w', encoding='utf-8') as f:
+        f.write(actions)
+    # print("Actions: ", actions)
+    
+    raise
+
+    # generate a pdf report with review summaries and actionable insights
+    generate_report(config, curr_bus_data, bus_review_summary_dict, 
+                      neigh_review_summary_dict, actions)
 
 
 if __name__ == "__main__":
@@ -182,8 +167,12 @@ if __name__ == "__main__":
     city = 'New Orleans'
     # id = VVH6k9-ycttH3TV_lk5WfQ
 
+    config = Config()
     business_id = get_business_id(config, restanrant_name, city)
+    
     if business_id is not None:
         generate_review_insights(config, business_id, verbose=True)
+    
+    
 
      

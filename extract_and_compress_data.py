@@ -118,7 +118,7 @@ def load_data_from_json(config):
         pandas.DataFrame: The loaded data as a DataFrame.
     """
     json_data = []
-    with open(config['file_path']) as fp:
+    with open(config['file_path'], encoding='utf-8', errors='ignore') as fp:
         for line in fp:
             # get 'extra data on line xyz' error if using json.loads(fp)
             # because of raw data formatting issues
@@ -141,17 +141,20 @@ def extract_data(config):
     Returns:
         bool: True if the data extraction and compression is successful, False otherwise.
     """
-    try:
-        config['file_path'] = os.path.join(config['data_dir'], config['fname']+'.json')
+    config['file_path'] = os.path.join(config['data_dir'], config['fname']+'.json')
+    pq_fpath = os.path.join(config['data_dir'], config['fname']+'.parquet')
+    
+    if os.path.exists(pq_fpath) and not config['force_extract_data']:
+        print(f"Parquet file already exists for {config['fname']}. force_extrac_data is \
+            set to False. Skipping...")
+        return True
 
+    try:
         print("Reading data from json file...")
         df = load_data_from_json(config)
-        
         print("Compressing data...")
         df, nalist = reduce_mem_usage(df)
-        
         print("Writing to parquet file...")
-        pq_fpath = os.path.join(config['data_dir'], config['fname']+'.parquet')
         pq.write_table(pa.Table.from_pandas(df), pq_fpath)
         
         del df
@@ -171,7 +174,8 @@ if __name__ == '__main__':
     config = config_ref.get_config()
 
     for fname in ['business', 'user', 'review', 'tip', 'checkin']:
-        config['fname'] = fname
+        config['fname'] = 'yelp_academic_dataset_'+fname
         extract_data(config)
-        print("{fname} data extracted, compressed and saved successfully...")
+        print(f"{fname} data extracted, compressed and saved successfully...")
+        print("-"*50)
     
