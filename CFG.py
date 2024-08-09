@@ -4,17 +4,17 @@ import os
 class Config:
     def __init__(self):
         self.config_dict = {
-                'data_dir': os.path.join('data'),
+                'downloaded_data_dir': os.path.join('..', 'data', 'downloaded_data'),
+                'extracted_data_dir': os.path.join('..', 'data', 'extracted_compressed_data'),
+                'db_storage_dir': os.path.join('..', 'data', 'db_storage'),
+                'output_dir': os.path.join('..', 'output'),
                 
-                'db_storage_dir': os.path.join('data', 'db_storage'),
                 'db_name': 'yelp_data',
-                
                 'data_db_access_uname': 'db_admin_1', 
                 'data_db_access_pwd': 'pass1234',
+                
                 'create_db_if_not_exists': True, # for data_db
-                
-                'force_extract_data': True,
-                
+                'force_extract_data': False,
                 'openai_api_key_path': os.path.join('..', 'openai_api_key.txt'),
             }
 
