@@ -1,9 +1,22 @@
-
+'''
+    This file contains the configuration for the project.
+    It contains the configurations for the data preprocessing and general/miscellaneous code execution.
+    
+    __author__ = ""
+    __email__ = ""
+    __version__ = ""
+    __date__ = ""
+'''
 import os
 
 class Config:
     def __init__(self):
+        # General configuration
         self.config_dict = {
+                'sentiment_classifier_model_name': "distilbert-base-uncased-finetuned-sst-2-english",  # HuggingFace name
+                'summarizer_model_name': "t5-base",  # HuggingFace name
+                'action_generator_GPT_name': "gpt-4o-mini",  # openAI GPT name
+                
                 'downloaded_data_dir': os.path.join('..', 'data', 'downloaded_data'),
                 'extracted_data_dir': os.path.join('..', 'data', 'extracted_compressed_data'),
                 'db_storage_dir': os.path.join('..', 'data', 'db_storage'),
@@ -15,9 +28,10 @@ class Config:
                 
                 'create_db_if_not_exists': True, # for data_db
                 'force_extract_data': False,
-                'openai_api_key_path': os.path.join('..', 'openai_api_key.txt'),
+                'openai_api_key_path': os.path.join('..', '..', 'openai_api_key.txt'),
             }
 
+        # Data preprocessing configuration - For each table/data-file
         self.data_preprocessing_config = {
                 'business': {
                         'id_cols': ['business_id'],

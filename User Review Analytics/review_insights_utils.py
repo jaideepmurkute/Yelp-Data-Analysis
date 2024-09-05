@@ -1,10 +1,21 @@
-import openai
+
+'''
+    Utility functions for the User Review Analytics project.
+    Contains classes for Sentiment Classification, Review Summarization and Action Recommendation.
+
+    __author__ = ''
+    __email__ = ''
+    __date__ = ''
+    __version__ = ''
+'''
+from typing import Optional, Dict, List, Any
+
 from openai import OpenAI
 import pandas as pd
 import numpy as np
 import torch
 from transformers import pipeline, GPT2Tokenizer, GPT2LMHeadModel
-torch.set_num_threads(4)
+# torch.set_num_threads(4)
 
 
 class SentimentClassifier:
@@ -36,12 +47,12 @@ class SentimentClassifier:
             # 2  It works okay.                          1 (i.e. Positive)
     """
     def __init__(self, config: dict) -> None:
-        self.config = config
+        self.sentiment_classifier_model_name = config.config_dict['sentiment_classifier_model_name']
         self.pipeline = self.get_sentiment_classifier_pipeline()
 
     def get_sentiment_classifier_pipeline(self) -> pipeline:
         return pipeline("sentiment-analysis", 
-                    model="distilbert-base-uncased-finetuned-sst-2-english",
+                    model=self.sentiment_classifier_model_name,
                     device=-1, # Force CPU usage (0 = index of first CPU)
                     truncation=True,
                     max_length=512, # Increase the max length to 512
@@ -56,49 +67,103 @@ class SentimentClassifier:
     
 
 class ReviewSummarizer:
+    '''
+        Review Summarizer class to summarize the reviews using the HuggingFace pipeline.
+    '''
     def __init__(self, config):
         self.config = config
-    
+        self.summarizer_model_name = config.config_dict['summarizer_model_name']
+        self.summarizer_pipeline = self.get_text_summarizer_pipeline()
+        self.max_len = 128
+        
     def get_text_summarizer_pipeline(self) -> pipeline:
+        '''
+            Load the summarizer model pipeline.
+
+            Args:
+                None
+            
+            Returns:
+                Summarizer model pipeline.
+        '''
         summarizer = pipeline("summarization",
-                            model="t5-base",
+                            model=self.summarizer_model_name, 
                             device=-1,  # Force CPU usage (0 = index of first CPU)
-                            # max_length=128, 
+                            max_length=self.max_len, 
                             # truncation=True, 
                            )
         
         return summarizer
 
-    def summarize_reviews(self, df, summarizer):
+    def summarize_reviews(self, df: pd.DataFrame) -> str:
+        '''
+            Call the summarizer model pipeline to summarize the reviews in the DataFrame.
+            
+            Args:
+                df: DataFrame containing the reviews to summarize.
+            
+            Returns:
+                List of summaries of the reviews.
+        '''
         reviews = df['text'].tolist()
         reviews = ' '.join(reviews)  # Merge all the reviews chunks into a single string
         
-        summaries = summarizer(reviews, truncation=True, max_length=128)
+        summaries = self.summarizer_pipeline(reviews, truncation=True, max_length=self.max_len)
         for summary in summaries:
             print("len(summary['summary_text']): ", len(summary['summary_text']))
         
-        # df['summary'] = [summary['summary_text'] for summary in summaries]
-        
         return summaries[0]['summary_text']
 
-    def get_review_chunks(self, reviews, n_chunks=5, chunk_size=10):
+    def get_review_chunks(self, reviews: pd.DataFrame, n_chunks: Optional[int]=5, chunk_size: Optional[int]=10):
+        '''
+            Create n chunks of k reviews each - we want n review summaries.
+            Reviews are randomly sampled to create each chunk are all reviews within a chunk 
+            are merged into a single string.
+            
+            Args:
+                reviews: DataFrame containing the reviews.
+                n_chunks: Number of review chunks to summarize.
+                chunk_size: Number of reviews in each chunk.
+            
+            Returns:
+                DataFrame containing the review chunks.
+        '''
         # Create n chunks of k reviews each - we want n review summaries 
         review_chunks = []
+        num_revs_added = 0
         for i in range(n_chunks):
-            # Generate random indices
+            # sample random indices for reviews to fetch
             random_indices = np.random.choice(reviews.shape[0], 
                         size=min(reviews.shape[0], chunk_size), replace=False)
 
             selected_texts = reviews.iloc[random_indices]['text'].tolist()
-
-            # Merge all the text rows
+            num_revs_added += len(random_indices)
+            
+            # Merge all the text rows in this chunk
             merged_text = ''.join(selected_texts)
 
             review_chunks.append(merged_text)
 
+            if num_revs_added >= 0.8*reviews.shape[0]:
+                break
+            
         return pd.DataFrame({'text': review_chunks})
 
-    def generate_per_sentiment_summary(self, review_df, verbose=False):
+    def generate_per_sentiment_summary(self, review_df: pd.DataFrame, n_chunks: Optional[int]=5, 
+                                       chunk_size: Optional[int]=25, verbose: Optional[bool]=False):
+        '''
+            Generate summary of positive and negative reviews - by feeding reviews of each kind 
+            to the summarizer model.
+        
+            Args:
+                review_df: DataFrame containing the reviews and their sentiment labels.
+                n_chunks: Number of review chunks to summarize.
+                chunk_size: Number of reviews in each chunk.
+                verbose: Whether to print the progress.
+            
+            Returns:
+                Dictionary containing the summary of positive and negative reviews.
+        '''
         pos_reviews = review_df[review_df['sentiment_label'] == 1]['text'].to_frame()
         neg_reviews = review_df[review_df['sentiment_label'] == 0]['text'].to_frame()
 
@@ -106,38 +171,33 @@ class ReviewSummarizer:
             print("Number of positive reviews:", len(pos_reviews))
             print("Number of negative reviews:", len(neg_reviews))
 
-        # ----------------------
-
-        n_chunks = 5  # How many review chunks, each of size 'each_chunk_reviews', to summaize
-        chunk_size = 25  # Number of reviews in each chunk
-
         pos_reviews_chunk = self.get_review_chunks(pos_reviews, n_chunks, chunk_size)
         neg_reviews_chunk = self.get_review_chunks(neg_reviews, n_chunks, chunk_size)
 
-        # ----------------------
-
-        summarizer_pipeline = self.get_text_summarizer_pipeline()
-        
         if verbose: print("Summarizing positive reviews...")
-        # pos_review_summaries = self.summarize_reviews(pos_reviews_chunk, summarizer_pipeline)
-        # pos_summary = ''.join(pos_review_summaries.summary.values)
-        pos_summary = self.summarize_reviews(pos_reviews_chunk, summarizer_pipeline)
+        pos_summary = self.summarize_reviews(pos_reviews_chunk)
         
         if verbose: print("Summarizing negative reviews...")
-        # neg_review_summaries = self.summarize_reviews(neg_reviews_chunk, summarizer_pipeline)
-        # neg_summary = ''.join(neg_review_summaries.summary.values)
-        neg_summary = self.summarize_reviews(neg_reviews_chunk, summarizer_pipeline)
+        neg_summary = self.summarize_reviews(neg_reviews_chunk)
         
         return {'pos_summary': pos_summary, 'neg_summary': neg_summary}
 
 
 class ActionRecommender:
+    '''
+        ActionRecommender class to generate actionable insights - based on business's user review summaries - 
+        using the ChatGPT model.
+    '''
     def __init__(self, config):
         with open(config.config_dict['openai_api_key_path'], 'r') as f:
             api_key = f.read().strip()
         self.chat_client = OpenAI(api_key=api_key)
+        self.gpt_model_name = config.config_dict['action_generator_GPT_name']
         
     def get_context_instructions(self):
+        '''
+            Set context instructions for ChatGPT - helps to make model output more relevant.
+        '''
         return "A resutarant owner/manager has requested actionable insights based on the user reviews \
         the business received on restaurant aggregator/recommender website. \
         Following information will contain: \
@@ -147,20 +207,41 @@ class ActionRecommender:
         "
     
     def get_output_instructions(self):
-        return " Output Instructions: \
+        '''
+            Set output instructions for ChatGPT - helps to control the model output structure and content.
+        '''
+        return ''' Output Instructions: \
                 Be concise, practical, aware of context like business category and user reviews. \
                 Insights/recommendations should be clear, actionable and domain specific. \
                 Do not equivocate if unsure. Have bullet points structure in response.\
+                
                 Goals of readers:\
                 Understand and improve the customer experience and ratings.  \
                 Identify areas of improvement - both comparatively to others and individually. \
                 Improve the customer satisfaction and business financials. \
-            "
+                
+                Your Answer should of format: 
+                    Point 1:
+                        - Actionable Insight 1
+                        - Actionable Insight 2
+                    Point 2:
+                        - Actionable Insight 1
+                        - Actionable Insight 2
+                    etc. 
+                'Point', 'Actionable Insight 1' etc.are placeholders. Replace 'Point 1/2' with name of the 
+                recommendation. Remove 'Actionable Insight 1/2' from your response.\
+                The Point should end with a colon and the Actionable Insight should start with a hyphen.\
+                    
+                Do not have any text preceeding or following the actionable insights.\
+                Have at least 1 point and 1 actionable insight in the point.\
+                Do not have more than 5 points and no more than 3 actionable insights in the point.\
+            '''
         
-        # return ""
-    
-    def get_info_str(self, bus_review_summary_dict, other_review_summary_dict, 
-                                     curr_bus_data):
+    def get_info_str(self, bus_review_summary_dict: Dict, other_review_summary_dict: Dict, 
+                    curr_bus_data: pd.DataFrame) -> str:
+        '''
+            Build a string with business's review summary for the ChatGPT prompt.
+        '''
         bus_city = curr_bus_data.city.values[0]
         bus_category = curr_bus_data.categories.values[0].split(', ')
         
@@ -175,8 +256,11 @@ class ActionRecommender:
                     \tNegative: {other_review_summary_dict["neg_summary"]}.\
             "
     
-    def generate_prompt(self, bus_review_summary_dict, other_review_summary_dict,
-                        curr_bus_data):
+    def generate_prompt(self, bus_review_summary_dict: Dict, other_review_summary_dict: Dict,
+                        curr_bus_data: pd.DataFrame) -> str:
+        '''
+        Generate a prompt for the ChatGPT model.
+        '''
         context_instruct = self.get_context_instructions()
         op_instruct = self.get_output_instructions()
         info_str = self.get_info_str(bus_review_summary_dict, other_review_summary_dict, 
@@ -185,168 +269,27 @@ class ActionRecommender:
         prompt = f"{context_instruct}\n{op_instruct}\n{info_str}\n"
         
         return prompt
-    '''
-    def generate_actions(self, bus_review_summary_dict, other_review_summary_dict, 
-                                  curr_bus_data, verbose=False):
-        # bus_review_summary_dict = {'pos_summary': 'this is a good restaurant', 'neg_summary': 'this is a bad restaurant'}
-        # other_review_summary_dict = {'pos_summary': 'this is a good restaurant', 'neg_summary': 'this is a bad restaurant'}
-        # curr_bus_data = pd.DataFrame({'city': ['Toronto'], 'categories': ['Restaurants']})
-        
-        prompt = self.generate_prompt(bus_review_summary_dict, other_review_summary_dict,
-                                        curr_bus_data)
-        print("Prompt: ", prompt)
-        print("*^&%^"*10)
-        
-        print("len(prompt): ", len(prompt))
-        print("len(prompt.split()): ", len(prompt.split()))
-        
-        
-        # prompt = "hello"
-        
-        # Load pre-trained model and tokenizer
-        model = GPT2LMHeadModel.from_pretrained('gpt2')
-        model.eval()
-        
-        tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-        # max_length = 512
-        
-        # Ensure input_ids are truncated to the model's maximum sequence length
-        input_ids = tokenizer.encode(prompt, return_tensors='pt', add_special_tokens=True, 
-                                     max_length=512, truncation=True)
-        print("input_ids.shape: ", input_ids.shape)
-        
-        # input_ids = input_ids[:, :max_length]
-        print("After slicing to max_length; input_ids.shape: ", input_ids.shape)
-        
-        attention_mask = (input_ids != tokenizer.pad_token_id).long()
-        
-        print("attention_mask.shape: ", attention_mask.shape)
-        
-        outputs = model.generate(
-                input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=512,
-                num_return_sequences=5,
-                do_sample=True,
-                top_k=50, # limits the sampling pool to the top k most probable next tokens
-                top_p=0.95,  # (nucleus sampling) smallest set of tokens whose cumulative probability is greater than or equal to p
-                temperature=0.7, # affects randomness of the output, lower means more deterministic
-                # An n-gram is a contiguous sequence of n items from a given sample of text
-                no_repeat_ngram_size=2, # prevent the model from repeating phrases of a certain length. For example, if no_repeat_ngram_size=2, the model will avoid repeating any bigrams
-                repetition_penalty=1.2 # penalty to the probability of tokens that have already been generated,
-            )
-        
-        # Decode and print only the newly generated sequence
-        decoded_outputs = []
-        input_length = input_ids.shape[1]
-        for i, output in enumerate(outputs):
-            # Get the length of the input sequence
-            
-            # Slice the output to get only the newly generated tokens
-            generated_sequence = output[input_length:]
-            
-            generated_text = tokenizer.decode(generated_sequence, skip_special_tokens=True)
-            # Simple post-processing: remove any text after the first period to get a complete sentence
-            generated_text = generated_text.split('.')[0] + '.'
-
-            print(f"Generated Text {i+1}: {generated_text}")
-            decoded_outputs.append(generated_text)
-            
-            print("-"*30)
-
-        
-        print('-'*30)
-        
-        return decoded_outputs
-    '''
-    def generate_actions(self, bus_review_summary_dict, other_review_summary_dict, 
-                                  curr_bus_data, verbose=False):
-        # prompt = self.generate_prompt(bus_review_summary_dict, other_review_summary_dict,
-        #                                 curr_bus_data)
+    
+    def generate_actions(self, bus_review_summary_dict: Dict, other_review_summary_dict: Dict, 
+                                  curr_bus_data: pd.DataFrame, verbose: Optional[bool]=False) -> str:
         '''
-        # Make a request to the OpenAI GPT-4 API
-        response = openai.Completion.create(
-            engine="text-davinci-004",  # Use "gpt-4" for GPT-4 model
-            prompt=prompt,
-            
-            max_tokens=150,  # The maximum number of tokens to generate.
-            n=1,    # The number of responses to generate.
-            
-            # The sequence where the API should stop generating further tokens. If None, it will generate until it hits 
-            # the max tokens limit.
-            stop=None,  
-            
-            # Controls the randomness of the output. Lower values make the output more focused and deterministic.
-            temperature=0.7  # Adjust the temperature for more creative or focused responses
-        )
-        
-        # Extract the text response
-        response = response.choices[0].text.strip()
+            Prompt the ChatGPT model and collect the response in desired format.
         '''
-        
-        '''
-        context_instruct = self.get_context_instructions()
-        op_instruct = self.get_output_instructions()
-        info_str = self.get_info_str(bus_review_summary_dict, other_review_summary_dict, 
-                                     curr_bus_data)
-        
-        # Make a request to the OpenAI GPT-4 API
-        response = openai.ChatCompletion.create(
-            model="gpt-4",  # Use "gpt-4" for GPT-4 model
-            messages=[
-                {"role": "system", "content": context_instruct + op_instruct},
-                {"role": "user", "content": info_str}
-            ],
-            max_tokens=150,  # The maximum number of tokens to generate.
-            n=1,  # The number of responses to generate.
-            
-            # The sequence where the API should stop generating further tokens. If None, it will generate until it hits the max tokens limit.
-            stop=None,  
-            
-            # Controls the randomness of the output. Lower values make the output more focused and deterministic.
-            temperature=0.7  # Adjust the temperature for more creative or focused responses
-        )
-
-        # Extract the response text
-        response_text = response['choices'][0]['message']['content']
-
-        # Print the response
-        print(response_text)
-        
-        return response_text
-        '''
-        
-        
         context_instruct = self.get_context_instructions()
         op_instruct = self.get_output_instructions()
         info_str = self.get_info_str(bus_review_summary_dict, other_review_summary_dict, 
                                      curr_bus_data)
         response = self.chat_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.gpt_model_name,
                 messages=[
-                    {"role": "system", "content": context_instruct+op_instruct},
+                    {"role": "system", "content": context_instruct + op_instruct},
                     {"role": "user", "content": info_str},
-                ]
+                    ]
                 )
-        
         response = response.choices[0].message.content
-        
-        print(response)
+        # print(response)
         
         return response
-
-
-# ar = ActionRecommender()
-# # ar.generate_actions({'pos_summary': 'this is a good restaurant', 'neg_summary': 'this is a bad restaurant'},
-# #                     {'pos_summary': 'this is a good restaurant', 'neg_summary': 'this is a bad restaurant'},
-# #                     pd.DataFrame({'city': ['Toronto'], 'categories': ['Restaurants']}), verbose=True)
-        
-# context_str = ar.get_context_instructions()
-# op_str = ar.get_output_instructions()
-# tot_str = context_str + op_str
-# print("len(tot_str): ", len(tot_str))
-# print("len(tot_str.split()): ", len(tot_str.split()))
 
         
         
