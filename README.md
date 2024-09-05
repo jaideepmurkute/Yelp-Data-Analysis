@@ -1,6 +1,14 @@
 # Yelp-Data-Analysis
+
 ## Description
-This project aims to analyze Yelp data and extract meaningful insights.
+This project aims to analyze Yelp data and extract meaningful insights.   
+**ETL and Preprocessing Pipeline**:  
+&emsp; Performs Data Extraction, Compression, Loading. Cleans up and encodes the data. Created SQL database.  
+**EDA Pipeline**:   
+&emsp; Generates data insights from data analysis with SQL queries and visualization with python.  
+**Analytics**:   
+&emsp; Performs analysis of user reviews a business recies and generates a report with insights and actionable steps for the the business.  
+&emsp;    (Sentiment classification, Review Summarization, Action Generation, Report Creation)  
 
 ## Installation
 1. Clone the repository:
@@ -13,36 +21,44 @@ This project aims to analyze Yelp data and extract meaningful insights.
     ```
 
 ## Usage
-ETL Pipeline:
-    ```cmd
-    cd ETL
-    ```
-    First, read the JSON data from Yelp, compress it and store as a parquet file
-    ```cmd
+### ETL Pipeline:
+```bash
+cd ETL
+```    
+1. ### Read the JSON data from Yelp, compress it and store as a parquet file
+    ```bash
     python extrat_and_compress_data.py
     ```
-    Perform data pre-processing, duplicate cleanups, dropping irrelevant data,data format encoding etc. 
+2. #### Perform data pre-processing, duplicate cleanups, dropping irrelevant data,data format encoding etc. 
+    ```bash
     python preprocess_data.py
     ```
-    Create SQL database from the data - for easier analysis.
-    ```cmd
+3. #### Create SQL database from the parquet data - for easier analysis.
+    ```bash
     python create_sql_db.py
     ```
-1. Perform Exploratory data analysis with SQL:
-    Run the notebook: EDA_sql.ipynb
-2. Perform Data vizualization with Python:
-    Run the notebook: EDA_visualizations.ipynb
-
-2. Run the analysis script:
+---------------------------------------------------------------------------------------------------
+### Exploratory Data Analysis 
+```bash
+cd EDA
+```
+1. #### Perform Exploratory data analysis with SQL:
+   ```
+   Run the notebook: EDA_sql.ipynb
+   ```
+2. #### Perform Data vizualization with Python:
+   ```
+   Run the notebook: EDA_visualizations.ipynb
+   ```
+---------------------------------------------------------------------------------------------------
+### Analytics 
+```bash
+cd User Review Analytics
+```
+1. #### Perform User Review Analytics(NLP) - Sentiment classification, Summarization and Actions Recommender(Generator)    
     ```bash
-    python analyze.py
+    python review_insights.py
     ```
-
-## Contributing
-Contributions are welcome! Please follow the guidelines in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 This project is licensed under the [MIT License](LICENSE).
-
-## Contact
-If you have any questions or suggestions, feel free to reach out to us at [email@example.com](mailto:email@example.com)."# New Repository" 
